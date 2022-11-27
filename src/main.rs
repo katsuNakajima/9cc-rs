@@ -31,7 +31,7 @@ struct Token {
     /// トークンの型
     kind: TokenKind,
     /// kindがTK_NUMの場合、その数値
-    val: i32,
+    val: Option<i32>,
     // トークン文字列
     str: String,
 }
@@ -64,11 +64,12 @@ fn expect_number<T: Iterator<Item = Token>>(token: &mut Peekable<T>) -> i32 {
     if tk.kind != TokenKind::TK_NUM {
         panic!("数ではありません");
     }
-    let val = tk.val;
+    let val = tk.val.unwrap();
     token.next();
     val
 }
 
+#[allow(dead_code)]
 fn at_eof<T: Iterator<Item = Token>>(token: &mut Peekable<T>) -> bool {
     let tk = token.peek().unwrap();
     tk.kind == TokenKind::TK_EOF
@@ -77,9 +78,9 @@ fn at_eof<T: Iterator<Item = Token>>(token: &mut Peekable<T>) -> bool {
 /// 新しいトークンを作成してcurに繋げる
 fn new_token(kind: TokenKind, str: String, cur: &mut Vec<Token>) {
     let val = if kind == TokenKind::TK_NUM {
-        str.parse().unwrap()
+        Some(str.parse().unwrap())
     } else {
-        0
+        None
     };
     let tok = Token {
         kind: kind,
@@ -99,7 +100,7 @@ fn tokienize(str: String, cur: &mut Vec<Token>) {
         let next_p = p.peek();
         match next_p {
             Some(a) => {
-                if a == &'+' || a == &'-' {
+                if a == &'+' || a == &'-' || a == &'*' || a == &'/' || a == &'(' || a == &')' {
                     new_token(TokenKind::TK_RESERVED, a.to_string(), cur);
                 } else if a.is_digit(10) {
                     new_token(TokenKind::TK_NUM, str_to_u(&mut p).to_string(), cur);
@@ -115,29 +116,138 @@ fn tokienize(str: String, cur: &mut Vec<Token>) {
     new_token(TokenKind::TK_EOF, str, cur);
 }
 
-fn gen(args: Vec<String>) {
+/// 抽象構文木のノードの種類
+#[derive(PartialEq)]
+enum NodeKind {
+    /// +
+    #[allow(non_camel_case_types)]
+    ND_ADD,
+    /// -
+    #[allow(non_camel_case_types)]
+    ND_SUB,
+    /// *
+    #[allow(non_camel_case_types)]
+    ND_MUL,
+    /// /
+    #[allow(non_camel_case_types)]
+    ND_DIV,
+    /// 整数
+    #[allow(non_camel_case_types)]
+    ND_NUM,
+}
+
+// 抽象構文木のノードの型
+struct Node {
+    /// ノードの型
+    kind: NodeKind,
+    /// 左辺
+    lhs: Option<Box<Node>>,
+    /// 右辺
+    rhs: Option<Box<Node>>,
+    /// kindがND_NUMの場合のみ使う
+    val: Option<i32>,
+}
+
+fn new_node(kind: NodeKind, lhs: Node, rhs: Node) -> Node {
+    let node = Node {
+        kind: kind,
+        lhs: Some(Box::new(lhs)),
+        rhs: Some(Box::new(rhs)),
+        val: None,
+    };
+    node
+}
+
+fn new_node_num(val: i32) -> Node {
+    let node = Node {
+        kind: NodeKind::ND_NUM,
+        lhs: None,
+        rhs: None,
+        val: Some(val),
+    };
+    node
+}
+
+fn expr<T: Iterator<Item = Token>>(token: &mut Peekable<T>) -> Node {
+    let mut node: Node = mul(token);
+
+    loop {
+        if consume('+', token) {
+            node = new_node(NodeKind::ND_ADD, node, mul(token));
+        } else if consume('-', token) {
+            node = new_node(NodeKind::ND_SUB, node, mul(token));
+        } else {
+            return node;
+        }
+    }
+}
+
+fn mul<T: Iterator<Item = Token>>(token: &mut Peekable<T>) -> Node {
+    let mut node = primary(token);
+
+    loop {
+        if consume('*', token) {
+            node = new_node(NodeKind::ND_MUL, node, primary(token));
+        } else if consume('/', token) {
+            node = new_node(NodeKind::ND_DIV, node, primary(token));
+        } else {
+            return node;
+        }
+    }
+}
+
+fn primary<T: Iterator<Item = Token>>(token: &mut Peekable<T>) -> Node {
+    // 次のトークンが"("なら、"(" expr ")"のはず
+    if consume('(', token) {
+        let node = expr(token);
+        expect(')', token);
+        return node;
+    }
+    // そうでなければ数値のはず
+    new_node_num(expect_number(token))
+}
+
+fn gen(node: Node) {
+    if node.kind == NodeKind::ND_NUM {
+        println!("  push {}", node.val.unwrap());
+        return;
+    }
+
+    gen(*node.lhs.unwrap());
+    gen(*node.rhs.unwrap());
+
+    println!("  pop rdi");
+    println!("  pop rax");
+
+    match node.kind {
+        NodeKind::ND_ADD => println!("  add rax, rdi"),
+        NodeKind::ND_SUB => println!("  sub rax, rdi"),
+        NodeKind::ND_MUL => println!("  imul rax, rdi"),
+        NodeKind::ND_DIV => println!("  cqo\n  idiv rdi"),
+        NodeKind::ND_NUM => (),
+    }
+
+    println!("  push rax");
+}
+
+fn main_sub(args: Vec<String>) {
     let mut cur: Vec<Token> = Vec::new();
     let arg = args[1].clone();
     tokienize(arg, &mut cur);
     let mut token = cur.into_iter().peekable();
+    let node = expr(&mut token);
 
     // アセンブリの前半部分を出力
     println!(".intel_syntax noprefix");
     println!(".globl main");
     println!("main:");
 
-    // 式の最初は数でなければならないので、それをチェックして
-    // 最初のmov命令を出力
-    println!("  mov rax, {}", expect_number(&mut token));
+    // 抽象構文木を下りながらコード生成
+    gen(node);
 
-    while !at_eof(&mut token) {
-        if consume('+', &mut token) {
-            println!("  add rax, {}", expect_number(&mut token));
-            continue;
-        }
-        expect('-', &mut token);
-        println!("  sub rax, {}", expect_number(&mut token));
-    }
+    // スタックトップに式全体の値が残っているはずなので
+    // それをRAXにロードして関数からの返り値とする
+    println!("  pop rax");
     println!("  ret");
 }
 
@@ -146,7 +256,7 @@ fn main() {
     if args.len() != 2 {
         panic!("引数の個数が正しくありません");
     }
-    gen(args);
+    main_sub(args);
 }
 
 #[cfg(test)]
@@ -155,18 +265,30 @@ mod tests {
     #[test]
     fn print_step1() {
         let args = vec!["dummy".to_string(), "123".to_string()];
-        gen(args);
+        main_sub(args);
     }
 
     #[test]
     fn print_step2() {
         let args = vec!["dummy".to_string(), "5+20-4".to_string()];
-        gen(args);
+        main_sub(args);
     }
 
     #[test]
     fn print_step3() {
         let args = vec!["dummy".to_string(), " 12 + 34 - 5 ".to_string()];
-        gen(args);
+        main_sub(args);
+    }
+
+    #[test]
+    fn print_step4_1() {
+        let args = vec!["dummy".to_string(), "5*(9-6)".to_string()];
+        main_sub(args);
+    }
+
+    #[test]
+    fn print_step4_2() {
+        let args = vec!["dummy".to_string(), "(3+5)/2".to_string()];
+        main_sub(args);
     }
 }
