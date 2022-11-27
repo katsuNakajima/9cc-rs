@@ -90,7 +90,7 @@ fn new_token(kind: TokenKind, str: String, cur: &mut Vec<Token>) {
     cur.push(tok);
 }
 
-// 入力文字列pをトークナイズしてそれを返す
+/// 入力文字列pをトークナイズしてそれを返す
 fn tokienize(str: String, cur: &mut Vec<Token>) {
     let mut str_no_space = str.clone();
     // 空白文字を削除
@@ -136,7 +136,7 @@ enum NodeKind {
     ND_NUM,
 }
 
-// 抽象構文木のノードの型
+/// 抽象構文木のノードの型
 struct Node {
     /// ノードの型
     kind: NodeKind,
@@ -183,17 +183,27 @@ fn expr<T: Iterator<Item = Token>>(token: &mut Peekable<T>) -> Node {
 }
 
 fn mul<T: Iterator<Item = Token>>(token: &mut Peekable<T>) -> Node {
-    let mut node = primary(token);
+    let mut node = unary(token);
 
     loop {
         if consume('*', token) {
-            node = new_node(NodeKind::ND_MUL, node, primary(token));
+            node = new_node(NodeKind::ND_MUL, node, unary(token));
         } else if consume('/', token) {
-            node = new_node(NodeKind::ND_DIV, node, primary(token));
+            node = new_node(NodeKind::ND_DIV, node, unary(token));
         } else {
             return node;
         }
     }
+}
+
+fn unary<T: Iterator<Item = Token>>(token: &mut Peekable<T>) -> Node {
+    if consume('+', token) {
+        return unary(token);
+    }
+    if consume('-', token) {
+        return new_node(NodeKind::ND_SUB, new_node_num(0), unary(token));
+    }
+    primary(token)
 }
 
 fn primary<T: Iterator<Item = Token>>(token: &mut Peekable<T>) -> Node {
@@ -281,14 +291,26 @@ mod tests {
     }
 
     #[test]
-    fn print_step4_1() {
+    fn print_step5_1() {
         let args = vec!["dummy".to_string(), "5*(9-6)".to_string()];
         main_sub(args);
     }
 
     #[test]
-    fn print_step4_2() {
+    fn print_step5_2() {
         let args = vec!["dummy".to_string(), "(3+5)/2".to_string()];
+        main_sub(args);
+    }
+
+    #[test]
+    fn print_step6_1() {
+        let args = vec!["dummy".to_string(), "-10+20".to_string()];
+        main_sub(args);
+    }
+
+    #[test]
+    fn print_step6_2() {
+        let args = vec!["dummy".to_string(), "- -10".to_string()];
         main_sub(args);
     }
 }
