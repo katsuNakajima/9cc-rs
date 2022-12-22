@@ -34,13 +34,19 @@ struct Token {
     val: Option<i32>,
     // トークン文字列
     str: String,
+    // トークンの長さ
+    len: i32,
 }
 
 /// 次のトークンが期待している記号のときには、トークンを1つ読み進めて真を返す。
 /// それ以外の場合には偽を返す。
-fn consume<T: Iterator<Item = Token>>(op: char, token: &mut Peekable<T>) -> bool {
+fn consume<T: Iterator<Item = Token>>(op: &str, token: &mut Peekable<T>) -> bool {
     let tk = token.peek().unwrap();
-    if tk.kind != TokenKind::TK_RESERVED || tk.str != op.to_string() {
+    if tk.kind != TokenKind::TK_RESERVED
+        || tk.str != op.to_string()
+        || op.len() != tk.len as usize
+        || tk.str[..tk.len as usize] != op[..tk.len as usize]
+    {
         return false;
     }
     token.next();
@@ -49,9 +55,13 @@ fn consume<T: Iterator<Item = Token>>(op: char, token: &mut Peekable<T>) -> bool
 
 /// 次のトークンが期待している記号のときには、トークンを1つ読み進める。
 /// それ以外の場合にはエラーを報告する。
-fn expect<T: Iterator<Item = Token>>(op: char, token: &mut Peekable<T>) {
+fn expect<T: Iterator<Item = Token>>(op: &str, token: &mut Peekable<T>) {
     let tk = token.peek().unwrap();
-    if tk.kind != TokenKind::TK_RESERVED || tk.str != op.to_string() {
+    if tk.kind != TokenKind::TK_RESERVED
+        || tk.str != op.to_string()
+        || op.len() != tk.len as usize
+        || tk.str[..tk.len as usize] != op[..tk.len as usize]
+    {
         panic!("{}ではありません", op);
     }
     token.next();
@@ -76,7 +86,7 @@ fn at_eof<T: Iterator<Item = Token>>(token: &mut Peekable<T>) -> bool {
 }
 
 /// 新しいトークンを作成してcurに繋げる
-fn new_token(kind: TokenKind, str: String, cur: &mut Vec<Token>) {
+fn new_token(kind: TokenKind, str: String, cur: &mut Vec<Token>, len: i32) {
     let val = if kind == TokenKind::TK_NUM {
         Some(str.parse().unwrap())
     } else {
@@ -86,8 +96,13 @@ fn new_token(kind: TokenKind, str: String, cur: &mut Vec<Token>) {
         kind: kind,
         str: str,
         val: val,
+        len: len,
     };
     cur.push(tok);
+}
+
+fn start_switch(p: &str, q: &str) -> bool{
+    p[..q.len() as usize] == q[..q.len() as usize]
 }
 
 /// 入力文字列pをトークナイズしてそれを返す
@@ -101,9 +116,9 @@ fn tokienize(str: String, cur: &mut Vec<Token>) {
         match next_p {
             Some(a) => {
                 if a == &'+' || a == &'-' || a == &'*' || a == &'/' || a == &'(' || a == &')' {
-                    new_token(TokenKind::TK_RESERVED, a.to_string(), cur);
+                    new_token(TokenKind::TK_RESERVED, a.to_string(), cur, 1);
                 } else if a.is_digit(10) {
-                    new_token(TokenKind::TK_NUM, str_to_u(&mut p).to_string(), cur);
+                    new_token(TokenKind::TK_NUM, str_to_u(&mut p).to_string(), cur, 0);
                     continue;
                 } else {
                     panic!("トークナイズできません");
@@ -113,7 +128,7 @@ fn tokienize(str: String, cur: &mut Vec<Token>) {
         }
         p.next();
     }
-    new_token(TokenKind::TK_EOF, str, cur);
+    new_token(TokenKind::TK_EOF, str, cur, 0);
 }
 
 /// 抽象構文木のノードの種類
